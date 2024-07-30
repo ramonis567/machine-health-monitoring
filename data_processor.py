@@ -50,7 +50,7 @@ def handle_sensor_data(topic, data):
     
     data_to_db(machine_id, sensor_id, timestamp, value)
     check_inactivity(machine_id, sensor_id, timestamp)
-    custom_processing(machine_id, sensor_id, timestamp, value)
+    moving_average(machine_id, sensor_id, timestamp, value)
 
 def data_to_db(machine_id, sensor_id, timestamp, value):
     point = Point(sensor_id).tag("machine_id", machine_id).field("value", value).time(timestamp)
@@ -72,7 +72,7 @@ def check_inactivity(machine_id, sensor_id, timestamp):
             raise_alarm(machine_id, "inactive")
     last_seen[(machine_id, sensor_id)] = timestamp
 
-def custom_processing(machine_id, sensor_id, timestamp, value):
+def moving_average(machine_id, sensor_id, timestamp, value):
     # if (machine_id, sensor_id) not in sensor_data_queues:
     #     sensor_data_queues[(machine_id, sensor_id)] = deque(maxlen=5)
     
