@@ -6,6 +6,7 @@ import paho.mqtt.client as paho
 from paho import mqtt
 from influxdb_client_3 import InfluxDBClient3, Point
 from datetime import datetime, timedelta
+from collections import deque
 
 # Carregar configurações do arquivo config.json
 with open("config.json", "r") as f:
@@ -16,8 +17,6 @@ sensors = config["sensors"]
 
 # Configurações do InfluxDB
 influx_token = "DURFi7PxQy5jY2CJSseIpn7VDlrk-TEYbh5bWWguQeWIrn-PjfZo6nde4DQ_pm-sUDI5GCMvypkHvAR0e9JVOw=="
-if not influx_token:
-    raise ValueError("InfluxDB token not found in environment variables")
 influx_org = "EngContrAut"
 influx_host = "https://us-east-1-1.aws.cloud2.influxdata.com"
 client_DB = InfluxDBClient3(host=influx_host, token=influx_token, org=influx_org)
@@ -33,17 +32,13 @@ mqtt_password = mqtt_config["password"]
 last_seen = {}
 data_intervals = {}
 
-# Função de logging para imprimir informações
-def log(message):
-    print(f"[{datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}] {message}")
-
 # Callback para processar mensagens MQTT
 def on_message(client, userdata, message):
     topic = message.topic
     payload = json.loads(message.payload.decode())
     
-    log(f"Received message on topic {topic}: {json.dumps(payload, indent=2)}")
-    
+    # print(f"Received message: {topic} -> {json.dumps(payload, indent=2)}")
+
     handle_sensor_data(topic, payload)
 
 def handle_sensor_data(topic, data):
@@ -51,20 +46,20 @@ def handle_sensor_data(topic, data):
     timestamp = datetime.strptime(data["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
     value = data["value"]
     
-    log(f"Handling data from machine {machine_id}, sensor {sensor_id} at {timestamp}: value={value}")
+    print(f"Data: {machine_id} - Sensor {sensor_id} at {timestamp}: value={value}")
     
-    persist_data(machine_id, sensor_id, timestamp, value)
+    data_to_db(machine_id, sensor_id, timestamp, value)
     check_inactivity(machine_id, sensor_id, timestamp)
     custom_processing(machine_id, sensor_id, timestamp, value)
 
-def persist_data(machine_id, sensor_id, timestamp, value):
+def data_to_db(machine_id, sensor_id, timestamp, value):
     point = Point(sensor_id).tag("machine_id", machine_id).field("value", value).time(timestamp)
-    bucket = f"{sensor_id}_data"
-    log(f"Persisting data to InfluxDB bucket {bucket} for {machine_id}/{sensor_id} at {timestamp}: value={value}")
+    # print(f"Saving data to InfluxDB bucket {sensor_id}_data for {machine_id} - {sensor_id} at {timestamp}: value={value}")
+
     try:
-        client_DB.write(database=bucket, record=point)
+        client_DB.write(database=f"{sensor_id}_data", record=point)
     except Exception as e:
-        log(f"Failed to write to InfluxDB: {e}")
+        print(f"Failed to write to InfluxDB: {e}")
 
 def check_inactivity(machine_id, sensor_id, timestamp):
     data_interval = data_intervals.get((machine_id, sensor_id), 5)  # Usar 5 segundos como padrão se não encontrado
@@ -73,23 +68,36 @@ def check_inactivity(machine_id, sensor_id, timestamp):
     if (machine_id, sensor_id) in last_seen:
         last_seen_time = last_seen[(machine_id, sensor_id)]
         if timestamp - last_seen_time > inactive_threshold:
-            log(f"Inactive alarm triggered for {machine_id}/{sensor_id}")
+            print(f"Inactive alarm triggered for {machine_id}/{sensor_id}")
             raise_alarm(machine_id, "inactive")
     last_seen[(machine_id, sensor_id)] = timestamp
 
 def custom_processing(machine_id, sensor_id, timestamp, value):
-    # Implementar processamento personalizado (exemplo: média móvel)
-    log(f"Custom processing for {machine_id}/{sensor_id} at {timestamp}: value={value}")
+    # if (machine_id, sensor_id) not in sensor_data_queues:
+    #     sensor_data_queues[(machine_id, sensor_id)] = deque(maxlen=5)
+    
+    # sensor_data_queues[(machine_id, sensor_id)].append(value)
+    # moving_average = sum(sensor_data_queues[(machine_id, sensor_id)]) / len(sensor_data_queues[(machine_id, sensor_id)])
+    
+    # print(f"Custom processing for {machine_id}/{sensor_id} at {timestamp}: value={value}, moving average={moving_average}")
+    
+    # point = Point(f"{sensor_id}_moving_average").tag("machine_id", machine_id).field("value", moving_average).time(timestamp)
+    # bucket = f"{sensor_id}_med_movel"
+    # try:
+    #     client_DB.write(database=bucket, record=point)
+    # except Exception as e:
+    #     print(f"Failed to write moving average to InfluxDB: {e}")
     pass
 
 def raise_alarm(machine_id, alarm_type):
-    point = Point(alarm_type).tag("machine_id", machine_id).field("value", 1).time(datetime.utcnow())
-    bucket = f"{machine_id}_alarms"
-    log(f"Raising alarm for {machine_id}: {alarm_type}")
-    try:
-        client_DB.write(database=bucket, record=point)
-    except Exception as e:
-        log(f"Failed to raise alarm: {e}")
+#     point = Point(alarm_type).tag("machine_id", machine_id).field("value", 1).time(datetime.utcnow())
+#     bucket = f"{machine_id}_alarms"
+#     print(f"Raising alarm for {machine_id}: {alarm_type}")
+#     try:
+#         client_DB.write(database=bucket, record=point)
+#     except Exception as e:
+#         log(f"Failed to raise alarm: {e}")
+    pass
 
 def parse_topic(topic):
     parts = topic.split('/')
@@ -109,7 +117,7 @@ def subscribe_to_topic(topic):
     client.loop_forever()
 
 def on_connect(client, userdata, flags, rc, properties=None):
-    log(f"CONNACK received with code {rc}")
+    print(f"CONNACK received with code {rc}")
 
 # Criar e iniciar uma thread para cada tópico de sensor
 for sensor in sensors:
@@ -120,6 +128,5 @@ for sensor in sensors:
     # Armazenar o data_interval para calcular o inactive_threshold dinamicamente
     data_intervals[(machine_id, sensor_id)] = data_interval / 1000  # Converter para segundos
 
-    log(f"Creating thread to subscribe to topic {topic} with data interval {data_interval} ms")
     thread = threading.Thread(target=subscribe_to_topic, args=(topic,))
     thread.start()
