@@ -80,13 +80,20 @@ def publish_initial_message(client, machine_id, sensors):
 # Função para publicar dados do sensor
 def publish_sensor_data(client, machine_id, sensor_id, get_data_func, interval):
     while True:
+        timestamp_value = get_timestamp()
+        data_value = get_data_func()
+
         data = {
-            "timestamp": get_timestamp(),
-            "value": get_data_func()
+            "timestamp": timestamp_value,
+            "value": data_value
         }
         topic = f"/sensors/{machine_id}/{sensor_id}"
         client.publish(topic, json.dumps(data), qos=1)
+
+        print("Publish: " + topic + " -> " + str(timestamp_value) + " -> " + str(data_value))
+
         time.sleep(interval / 1000)
+
 
 config = read_config('config.json')
 
